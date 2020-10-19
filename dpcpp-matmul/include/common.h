@@ -7,6 +7,8 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <algorithm>
+using namespace std;
 
 struct ProfileResult {
 	// Each profile entity will have Name, Starttime, Endtime
@@ -127,21 +129,3 @@ private:
 	bool m_Stopped;
 	std::chrono::time_point<std::chrono::high_resolution_clock> m_StartTimePoint;
 };
-
-// CL/sycl related functions
-#include "dpc_common.hpp"
-#include <CL/sycl.hpp>
-using namespace sycl;
-
-queue create_device_queue() {
-	try {
-		default_selector d_selector;
-		queue q(d_selector, dpc_common::exception_handler);
-		std::cout << "Enumerated Device: " << q.get_device().get_info<info::device::name>() << "\n";
-		return q;
-	}
-	catch (sycl::exception const& e) {
-		std::cout << "Exception while creating queue.\n";
-		std::terminate();
-	}
-}

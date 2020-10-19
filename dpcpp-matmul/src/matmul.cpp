@@ -15,18 +15,16 @@ TODO:
 */
 
 #include <CL/sycl.hpp>
-#include <Eigen/Dense>
 #include <iostream>
 #include "dpc_common.hpp"
 #include <limits>
+#include <vector>
+#include <stdlib.h>
 
 #include "common.h"
 #include "nanoblas.h"
 
 // Select namespaces
-using namespace std::this_thread;
-using namespace std::chrono;
-using namespace Eigen;
 using namespace sycl;
 
 #define PROFILING 1
@@ -40,20 +38,22 @@ int main() {
 	Instrumentor::Get().BeginSession("GPU MatMul");
 	PROFILE_FUNCTION();
 	
+	/* set seed */
+	srand(39872);
+
 	// Matrix size definitions
-	constexpr size_t multiplier = 128;
+	constexpr size_t multiplier = 4;
 	constexpr size_t M = 1 * multiplier;
 	constexpr size_t N = 1 * multiplier;
 	constexpr size_t P = 1 * multiplier;
 
-	// MatrixXd: X means X-dim, d means double
-	Matrix<double, -1, -1, RowMajor> a_host = Matrix<double, -1, -1>::Ones(M, N);
-	Matrix<double, -1, -1, RowMajor> b_host = Matrix<double, -1, -1>::Random(N, P) * 10;
-	Matrix<double, -1, -1, RowMajor> c_host = Matrix<double, -1, -1>::Zero(M, P);
+	std::vector<int> b_host(N*P);
+	std::vector<int> a_host(M*N);
+	std::vector<int> c_gpu(M*P);
+	std::vector<int> c_host(M*P);
 
-	// Device write-back placeholder
-	Matrix<double, -1, -1, RowMajor> c_gpu = Matrix<double, -1, -1>::Zero(M, P);
-	
+	for (int& item : b_host) { item = rand() % 10; }
+	for (int& item : a_host) { item = rand() % 10; }
 	/*
 	Now the standard procedure of 
 		1. Create a device queue with d_selector and exception handler
@@ -62,19 +62,14 @@ int main() {
 	*/
 	try {
 		queue q = create_device_queue();
-		MatrixMulParallelNaive(q, a_host, b_host, c_gpu);	
+		//MatrixMulParallelNaive<int>(q, M, N, P, a_host, b_host, c_gpu);	
+		MatrixMulTiled<int>(q, M, N, P, a_host, b_host, c_gpu);
 	}
 	catch (std::exception const& e) {
 		std::cout << "Exception while multiplying on GPU.\n";
 	}
 
-	// Now that you are out of try {..}, buffer destructors will copy back the data.
-	std::cout << "Computation on GPU finished.\nSwitching to CPU...\n";
-	std::cout << "CPU::Multiplying A and B into C.\n";
-	
-	InstrumentationTimer *t = new InstrumentationTimer("CPU run");
-	c_host = a_host * b_host;
-	delete t;
+	MatrixMulCPU<int>(M, N, P, a_host, b_host, c_host);
 	
 	bool result = VerifyResult(c_gpu, c_host);
 	Instrumentor::Get().EndSession();

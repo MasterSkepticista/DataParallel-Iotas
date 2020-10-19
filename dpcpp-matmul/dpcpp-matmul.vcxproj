@@ -84,7 +84,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\eigen-matmul.cpp" />
+    <ClCompile Include="src\matmul.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\common.h" />
