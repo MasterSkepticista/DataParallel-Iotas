@@ -33,27 +33,46 @@ using namespace sycl;
 #define PROFILE_FUNCTION() PROFILE_SCOPE(__FUNCSIG__) // __FUNCTION__ means function name, but overloading is useless here
 #endif
 
+#define DEBUG 0
 
 int main() {
 	Instrumentor::Get().BeginSession("GPU MatMul");
 	PROFILE_FUNCTION();
-	
+
 	/* set seed */
 	srand(39872);
 
 	// Matrix size definitions
-	constexpr size_t multiplier = 4;
+	constexpr size_t multiplier = 4096;
 	constexpr size_t M = 1 * multiplier;
 	constexpr size_t N = 1 * multiplier;
 	constexpr size_t P = 1 * multiplier;
 
-	std::vector<int> b_host(N*P);
-	std::vector<int> a_host(M*N);
-	std::vector<int> c_gpu(M*P);
-	std::vector<int> c_host(M*P);
+	std::vector<double> b_host(N * P);
+	std::vector<double> a_host(M * N);
+	std::vector<double> c_host(M * P);
 
-	for (int& item : b_host) { item = rand() % 10; }
-	for (int& item : a_host) { item = rand() % 10; }
+	std::vector<double> c_gemm(M * P);
+	std::vector<double> c_gemm2(M * P);
+
+	for (auto& item : a_host) { item = rand() % 10; }
+	for (auto& item : b_host) { item = rand() % 10; }
+
+#if DEBUG 
+	std::cout << "A_host\n";
+	for (int i = 0; i < M; i++) {
+		for (int j = 0; j < N; j++)
+			std::cout << a_host[i * N + j] << "\t";
+		std::cout << "\n";
+	}
+	std::cout << "B_host\n";
+	for (int i = 0; i < N; i++) {
+		for (int j = 0; j < P; j++)
+			std::cout << b_host[i * P + j] << "\t";
+		std::cout << "\n";
+	}
+#endif
+
 	/*
 	Now the standard procedure of 
 		1. Create a device queue with d_selector and exception handler
@@ -62,17 +81,32 @@ int main() {
 	*/
 	try {
 		queue q = create_device_queue();
-		//MatrixMulParallelNaive<int>(q, M, N, P, a_host, b_host, c_gpu);	
-		MatrixMulTiled<int>(q, M, N, P, a_host, b_host, c_gpu);
+		MatrixMulParallelNaive<double>(q, M, N, P, a_host, b_host, c_gemm);	
+		MatrixMulTiled<double>(q, M, N, P, a_host, b_host, c_gemm2);
 	}
 	catch (std::exception const& e) {
 		std::cout << "Exception while multiplying on GPU.\n";
 	}
 
-	MatrixMulCPU<int>(M, N, P, a_host, b_host, c_host);
-	
-	bool result = VerifyResult(c_gpu, c_host);
+	MatrixMulCPU<double>(M, N, P, a_host, b_host, c_host);
+
+#if DEBUG
+	std::cout << "C_gemm\n";
+	for (int i = 0; i < M; i++) {
+		for (int j = 0; j < P; j++)
+			std::cout << c_gemm[i * P + j] << "\t";
+		std::cout << "\n";
+	}
+	std::cout << "C_gemm2\n";
+	for (int i = 0; i < M; i++) {
+		for (int j = 0; j < P; j++)
+			std::cout << c_gemm2[i * P + j] << "\t";
+		std::cout << "\n";
+	}
+#endif
+	VerifyResult(c_gemm, c_host);
+	VerifyResult(c_gemm2, c_host);
 	Instrumentor::Get().EndSession();
-	return result;
+	return 0;
 }
 

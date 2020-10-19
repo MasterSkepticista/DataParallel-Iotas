@@ -42,18 +42,17 @@ void MatrixMulParallelNaive(queue& q,
 		
 		buffer<T, 1> a(a_host.data(), range<1>{a_host.size()});
 		buffer<T, 1> b(b_host.data(), range<1>{b_host.size()});
-		buffer<T, 2> c(c_gpu.data(), range<2>{M, P});
-		PROFILE_SCOPE("Starting Multiply on GPU");
-		std::cout << "GPU::Multiplying A and B into C.\n";
+		buffer<T, 1> c(c_gpu.data(), range<1>{c_gpu.size()});
+		
 		auto e = q.submit([&](handler& h) {
 
 			auto A = a.template get_access<access::mode::read>(h);
 			auto B = b.template get_access<access::mode::read>(h);
 			auto C = c.template get_access<access::mode::write>(h);
 			
-			h.parallel_for(range<2>{M, P}, [=](id<2> index) {
-				size_t row = index[0];
-				size_t col = index[1];
+			h.parallel_for(range<1>{(M*P)}, [=](id<1> index) {
+				size_t row = index / M;
+				size_t col = index % M;
 				auto sum = 0;
 				// Compute result of ONE element of C
 				for (size_t i = 0; i < N; i++)
@@ -78,12 +77,12 @@ void MatrixMulTiled(queue& q,
 	PROFILE_FUNCTION();
 	try {
 		/* window size TS x TS */
-		size_t TS = 2;
+		size_t TS = 16;
 
 		/* Create buffers */
 		buffer<T, 1> a(a_host.data(), range<1>{a_host.size()});
 		buffer<T, 1> b(b_host.data(), range<1>{b_host.size()});
-		buffer<T, 2> c(c_gpu.data(), range<2>{M, P});
+		buffer<T, 1> c(c_gpu.data(), range<1>{c_gpu.size()});
 
 		auto e = q.submit([&](handler& h) {
 			/* Create accessors */
@@ -91,35 +90,47 @@ void MatrixMulTiled(queue& q,
 			auto B = b.template get_access<access::mode::read>(h);
 			auto C = c.template get_access<access::mode::write>(h);
 
-			/* Local accessor hyperfast cache */
-			accessor<T, 1, access::mode::read_write, access::target::local> C_cache(range<1>{c_gpu.size()}, h);
+			/* Local accessor TILES: hyperfast cache */
+			accessor<T, 2, access::mode::read_write, access::target::local> Asub(range<2>{TS, TS}, h);
+			accessor<T, 2, access::mode::read_write, access::target::local> Bsub(range<2>{TS, TS}, h);
 
 			/* Create kernel */
-			h.parallel_for(nd_range<2>(range<2>(M, P), /* global range */
-									range<2>(TS, TS)), /* local range */
-									[=](nd_item<2> item) {
-				
-				/* ID in global x-y of each tile: Which tile is it, in x-y? */
-				const auto id_x = item.get_global_id(0);
-				const auto id_y = item.get_global_id(1);
-				
-				/* Map the 2D x-y coords to 1D */
-				const auto width = item.get_group_range(0) * item.get_local_range(0);
+			h.parallel_for(nd_range<2>(range<2>(M, P), range<2>(TS, TS)), [=](nd_item<2> item) {
+				/* row, col thread identifier for each tile */
+				size_t row = item.get_local_id(0);
+				size_t col = item.get_local_id(1);
 
-				/* Map each memory block to 1D now. This is to access each element */
-				const auto index = id_x * width + id_y;
+				/* row, col thread identifer of C */
+				size_t globalRow = TS * item.get_group().get_id(0) + row;
+				size_t globalCol = TS * item.get_group().get_id(1) + col;
 
-				/* ... computation ... */
+				auto acc = 0;
+				/* loop over all tiles */
+				const size_t num_tiles = P / TS;
+				for (size_t t = 0; t < num_tiles; t++) {
+					/* Load one tile of A and B into cache */
+					const size_t tiledRow = TS * t + row;
+					const size_t tiledCol = TS * t + col;
+					Asub[row][col] = A[globalRow * M + tiledCol];
+					Bsub[row][col] = B[tiledRow * N + globalCol];
+					
+					/* Barrier to sync the read-write */
+					item.barrier(access::fence_space::local_space);
+					
+					/* Do the matmul between Asub and Bsub */
+					for (size_t k = 0; k < TS; k++) {
+						acc += Asub[row][k] * Bsub[k][col];
+					}
 
-				/* Barrier to sync the read-write */
-				item.barrier(access::fence_space::local_space);
+					/* Barrier to sync the read-write */
+					item.barrier(access::fence_space::local_space);
 
+				}
 				/* Write from cache to host memory */
-				C[index] = C_cache[index];
-				
-				});
-
+				C[globalRow * M + globalCol] = acc;
 			});
+
+		});
 		e.wait();
 	}
 	catch (sycl::exception const& e) {
@@ -181,7 +192,7 @@ bool VerifyResult(std::vector<T>& c_gpu, std::vector<T>& c_host) {
 		return 0;
 	}
 	else {
-		std::cout << ":( Failed.";
+		std::cout << ":( Failed.\n";
 		return -1;
 	}
 }
