@@ -10,6 +10,11 @@
 #include <algorithm>
 using namespace std;
 
+#if PROFILING
+#define PROFILE_SCOPE(name) InstrumentationTimer timer##__LINE__(name) // TOO SMART. How to give same timernames in one function. You append LINE_NUMBER!!!
+#define PROFILE_FUNCTION() PROFILE_SCOPE(__FUNCSIG__) // __FUNCTION__ means function name, but overloading is useless here
+#endif
+
 struct ProfileResult {
 	// Each profile entity will have Name, Starttime, Endtime
 	std::string Name;

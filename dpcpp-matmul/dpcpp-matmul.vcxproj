@@ -75,6 +75,7 @@
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
       <SYCLWarningLevel>Level3</SYCLWarningLevel>
+      <AdditionalIncludeDirectories>C:\Users\karansh1\source\repos\dpcpp-iotas\dpcpp-matmul\include;C:\Users\karansh1\source\repos\eigen-3.3.7\eigen-3.3.7;$(ONEAPI_ROOT)dev-utilities\latest\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -89,6 +90,7 @@
   <ItemGroup>
     <ClInclude Include="include\common.h" />
     <ClInclude Include="include\nanoblas.h" />
+    <ClInclude Include="include\settings.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
