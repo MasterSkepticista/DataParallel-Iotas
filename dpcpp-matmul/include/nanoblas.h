@@ -5,23 +5,21 @@
 #include <vector>
 #include "settings.h"
 
-using namespace sycl;
-
 #define PROFILING 1
 #if PROFILING
 #define PROFILE_SCOPE(name) InstrumentationTimer timer##__LINE__(name) // Same timernames in one fn: append LINE_NUMBER!!!
 #define PROFILE_FUNCTION() PROFILE_SCOPE(__FUNCSIG__) // __FUNCTION__ only fn name, __FUNCSIG__ shows overloads
 #endif
 
-queue create_device_queue() {
+sycl::queue create_device_queue() {
 	PROFILE_FUNCTION();
 	try {
-		default_selector d_selector;
-		queue q(d_selector, dpc_common::exception_handler);
-		std::cout << "Enumerated Device: " << q.get_device().get_info<info::device::name>() << "\n";
-		auto wgroup_size = q.get_device().get_info<info::device::max_work_group_size>();
-		auto local_mem_size = q.get_device().get_info<info::device::local_mem_size>();
-		auto global_mem_size = q.get_device().get_info<info::device::global_mem_size>();
+		sycl::default_selector d_selector;
+		sycl::queue q(d_selector, dpc_common::exception_handler);
+		std::cout << "Enumerated Device: " << q.get_device().get_info<sycl::info::device::name>() << "\n";
+		auto wgroup_size = q.get_device().get_info<sycl::info::device::max_work_group_size>();
+		auto local_mem_size = q.get_device().get_info<sycl::info::device::local_mem_size>();
+		auto global_mem_size = q.get_device().get_info<sycl::info::device::global_mem_size>();
 
 		std::cout << "Maximum workgroup size\t:" << wgroup_size << "\n" 
 			<< "Global Memory Size\t:" << global_mem_size / 1024 / 1024 << " MB\n"
@@ -41,10 +39,10 @@ queue create_device_queue() {
 
 
 //-----------------------------------------------------------------------------
-// Kernel-1: Naive approach (roofline model) ~1.0x
+// Kernel-1: Naive approach (roofline model) 
 //-----------------------------------------------------------------------------
 template<typename T>
-void MatrixMulParallelNaive(queue& q, 
+void MatrixMulParallelNaive(sycl::queue& q, 
 	size_t M, size_t N, size_t P,
 	const std::vector<T>& a_host,
 	const std::vector<T>& b_host,
@@ -53,17 +51,17 @@ void MatrixMulParallelNaive(queue& q,
 	PROFILE_FUNCTION();
 	try {
 		
-		buffer<T, 1> a(a_host.data(), range<1>{a_host.size()});
-		buffer<T, 1> b(b_host.data(), range<1>{b_host.size()});
-		buffer<T, 1> c(c_gpu.data(), range<1>{c_gpu.size()});
+		sycl::buffer<T, 1> a(a_host.data(), sycl::range<1>{a_host.size()});
+		sycl::buffer<T, 1> b(b_host.data(), sycl::range<1>{b_host.size()});
+		sycl::buffer<T, 1> c(c_gpu.data(), sycl::range<1>{c_gpu.size()});
 		
-		auto e = q.submit([&](handler& h) {
+		auto e = q.submit([&](sycl::handler& h) {
 
-			auto A = a.template get_access<access::mode::read>(h);
-			auto B = b.template get_access<access::mode::read>(h);
-			auto C = c.template get_access<access::mode::write>(h);
+			auto A = a.template get_access<sycl::access::mode::read>(h);
+			auto B = b.template get_access<sycl::access::mode::read>(h);
+			auto C = c.template get_access<sycl::access::mode::write>(h);
 			
-			h.parallel_for(range<1>{c_gpu.size()}, [=](id<1> index) {
+			h.parallel_for(sycl::range<1>{c_gpu.size()}, [=](sycl::id<1> index) {
 				size_t row = index / M;
 				size_t col = index % M;
 				auto sum = 0;
@@ -82,33 +80,33 @@ void MatrixMulParallelNaive(queue& q,
 }
 
 //-----------------------------------------------------------------------------
-// Kernel-2: Tiled approach -> use on-chip cache registers ~2.5x
+// Kernel-2: Tiled approach -> use on-chip cache registers 
 //-----------------------------------------------------------------------------
 template <typename T>
-void MatrixMulTiled(queue& q,
-					size_t M, size_t N, size_t P,
-					const std::vector<T>& a_host,
-					const std::vector<T>& b_host,
-					std::vector<T>& c_gpu) {
+void MatrixMulTiled(sycl::queue& q,
+	size_t M, size_t N, size_t P,
+	const std::vector<T>& a_host,
+	const std::vector<T>& b_host,
+	std::vector<T>& c_gpu) {
 	PROFILE_FUNCTION();
 	try {
 		/* Create buffers */
-		buffer<T, 1> a(a_host.data(), range<1>{a_host.size()});
-		buffer<T, 1> b(b_host.data(), range<1>{b_host.size()});
-		buffer<T, 1> c(c_gpu.data(), range<1>{c_gpu.size()});
+		sycl::buffer<T, 1> a(a_host.data(), sycl::range<1>{a_host.size()});
+		sycl::buffer<T, 1> b(b_host.data(), sycl::range<1>{b_host.size()});
+		sycl::buffer<T, 1> c(c_gpu.data(), sycl::range<1>{c_gpu.size()});
 
-		auto e = q.submit([&](handler& h) {
+		auto e = q.submit([&](sycl::handler& h) {
 			/* Create accessors */
-			auto A = a.template get_access<access::mode::read>(h);
-			auto B = b.template get_access<access::mode::read>(h);
-			auto C = c.template get_access<access::mode::write>(h);
+			auto A = a.template get_access<sycl::access::mode::read>(h);
+			auto B = b.template get_access<sycl::access::mode::read>(h);
+			auto C = c.template get_access<sycl::access::mode::write>(h);
 
 			/* Local accessor TILES: hyperfast cache */
-			accessor<T, 2, access::mode::read_write, access::target::local> Asub(range<2>{TS, TS}, h);
-			accessor<T, 2, access::mode::read_write, access::target::local> Bsub(range<2>{TS, TS}, h);
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Asub(sycl::range<2>{TS, TS}, h);
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Bsub(sycl::range<2>{TS, TS}, h);
 
 			/* Create kernel */
-			h.parallel_for(nd_range<2>(range<2>(M, P), range<2>(TS, TS)), [=](nd_item<2> item) {
+			h.parallel_for(sycl::nd_range<2>(sycl::range<2>(M, P), sycl::range<2>(TS, TS)), [=](sycl::nd_item<2> item) {
 				/* row, col thread identifier for each tile */
 				size_t row = item.get_local_id(0);
 				size_t col = item.get_local_id(1);
@@ -119,16 +117,16 @@ void MatrixMulTiled(queue& q,
 
 				T acc = 0;
 				/* loop over all tiles */
-				const size_t num_tiles = P / TS;
+				const size_t num_tiles = N / TS;
 				for (size_t t = 0; t < num_tiles; t++) {
 					/* Load one tile of A and B into cache */
 					const size_t tiledRow = TS * t + row;
 					const size_t tiledCol = TS * t + col;
-					Asub[row][col] = A[globalRow * M + tiledCol];
-					Bsub[row][col] = B[tiledRow * N + globalCol];
+					Asub[row][col] = A[globalRow * N + tiledCol];
+					Bsub[row][col] = B[tiledRow * P + globalCol];
 					
 					/* Barrier to sync the read-write */
-					item.barrier(access::fence_space::local_space);
+					item.barrier(sycl::access::fence_space::local_space);
 					
 					/* Do the matmul between Asub and Bsub */
 					for (size_t k = 0; k < TS; k++) {
@@ -136,7 +134,7 @@ void MatrixMulTiled(queue& q,
 					}
 
 					/* Barrier to sync the read-write */
-					item.barrier(access::fence_space::local_space);
+					item.barrier(sycl::access::fence_space::local_space);
 				}
 				/* Write from cache to host memory */
 				C[globalRow * M + globalCol] = acc;
@@ -152,33 +150,33 @@ void MatrixMulTiled(queue& q,
 }
 
 //-----------------------------------------------------------------------------
-// Kernel-3: Increase WPT (Work per thread) ~?x
+// Kernel-3: Increase WPT (Work per thread) 
 //-----------------------------------------------------------------------------
 template <typename T>
-void MatrixMulWPT(queue &q, 
-				size_t M, size_t N, size_t P,
-				const std::vector<T>& a_host,
-				const std::vector<T>& b_host,
-				std::vector<T>& c_gpu) {
+void MatrixMulWPT(sycl::queue &q, 
+	size_t M, size_t N, size_t P,
+	const std::vector<T>& a_host,
+	const std::vector<T>& b_host,
+	std::vector<T>& c_gpu) {
 	PROFILE_FUNCTION();
 	try {
 		/* Create buffers */
-		buffer<T, 1> a_buf(a_host.data(), range<1>{a_host.size()});
-		buffer<T, 1> b_buf(b_host.data(), range<1>{b_host.size()});
-		buffer<T, 1> c_buf(c_gpu.data(), range<1>{c_gpu.size()});
+		sycl::buffer<T, 1> a_buf(a_host.data(), sycl::range<1>{a_host.size()});
+		sycl::buffer<T, 1> b_buf(b_host.data(), sycl::range<1>{b_host.size()});
+		sycl::buffer<T, 1> c_buf(c_gpu.data(), sycl::range<1>{c_gpu.size()});
 
 		/* Submit to queue with buffer accessors */
-		auto e = q.submit([&](handler& h) {
+		auto e = q.submit([&](sycl::handler& h) {
 
-			auto A = a_buf.template get_access<access::mode::read>(h);
-			auto B = b_buf.template get_access<access::mode::read>(h);
-			auto C = c_buf.template get_access<access::mode::write>(h);
+			auto A = a_buf.template get_access<sycl::access::mode::read>(h);
+			auto B = b_buf.template get_access<sycl::access::mode::read>(h);
+			auto C = c_buf.template get_access<sycl::access::mode::write>(h);
 
 			/* Create cache reservations for workgroup */
-			accessor<T, 2, access::mode::read_write, access::target::local> Asub(range<2>{TS, TS}, h);
-			accessor<T, 2, access::mode::read_write, access::target::local> Bsub(range<2>{TS, TS}, h);
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Asub(sycl::range<2>{TS, TS}, h);
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Bsub(sycl::range<2>{TS, TS}, h);
 
-			h.parallel_for(nd_range<2>(range<2>{M, P/WPT}, range<2>{TS, RTS}), [=](nd_item<2> item) {
+			h.parallel_for(sycl::nd_range<2>(sycl::range<2>{M, P/WPT}, sycl::range<2>{TS, RTS}), [=](sycl::nd_item<2> item) {
 				/* Thread identifiers of work-item */
 				const int row = item.get_local_id(0); // 0-3 (1-TS)
 				const int col = item.get_local_id(1); // 0-1 (1-TS/WPT)
@@ -192,17 +190,17 @@ void MatrixMulWPT(queue &q,
 				for (int w = 0; w < WPT; w++) { acc[w] = 0; }
 
 				/* For all tiles */
-				const int num_tiles = P / TS;
+				const int num_tiles = N / TS;
 				for (int t = 0; t < num_tiles; t++) {
 					/* Load a tile into cache for both A and B */
 					for (int w = 0; w < WPT; w++) {
 						const int tiledRow = TS * t + row;
 						const int tiledCol = TS * t + col;
-						Asub[row][col + w*RTS] = A[globalRow * M + tiledCol + w*RTS];
-						Bsub[row][col + w*RTS] = B[tiledRow * N + globalCol + w*RTS];
+						Asub[row][col + w*RTS] = A[globalRow * N + tiledCol + w*RTS];
+						Bsub[row][col + w*RTS] = B[tiledRow * P + globalCol + w*RTS];
 					}
 					/* cache-sync */
-					item.barrier(access::fence_space::local_space);
+					item.barrier(sycl::access::fence_space::local_space);
 
 					/* Compute result for one element */
 					for (int k = 0; k < TS; k++) {
@@ -210,7 +208,7 @@ void MatrixMulWPT(queue &q,
 							acc[w] += Asub[row][k] * Bsub[k][col + w * RTS];
 					}
 					/* cache-sync */
-					item.barrier(access::fence_space::local_space);
+					item.barrier(sycl::access::fence_space::local_space);
 				}
 				/* store values to C */
 				for (int w = 0; w < WPT; w++)
@@ -224,6 +222,75 @@ void MatrixMulWPT(queue &q,
 		terminate();
 	}
 }
+
+//-----------------------------------------------------------------------------
+// Kernel-4: Increase width of datatype and WPT (Work per thread) 
+//-----------------------------------------------------------------------------
+template <typename T>
+void MatrixMulWideWPT(sycl::queue& q,
+	size_t M, size_t N, size_t P,
+	const std::vector<T>& a_host,
+	const std::vector<T>& b_host,
+	std::vector<T>& c_gpu) {
+	
+	PROFILE_FUNCTION();
+	try {
+		sycl::buffer<T, 1> a_buf(a_host.data(), sycl::range<1>{a_host.size()});
+		sycl::buffer<T, 1> b_buf(b_host.data(), sycl::range<1>{b_host.size()});
+		sycl::buffer<T, 1> c_buf(c_gpu.data(), sycl::range<1>{c_gpu.size()});
+
+		auto e = q.submit([&](sycl::handler& h) {
+			/* Placeholders */
+			auto A = a_buf.template get_access<sycl::access::mode::read>(h);
+			auto B = b_buf.template get_access<sycl::access::mode::read>(h);
+			auto C = c_buf.template get_access<sycl::access::mode::write>(h);
+
+			/* Local cache reservation for tiles */
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Asub(sycl::range<2>{TS, TS}, h);
+			sycl::accessor<T, 2, sycl::access::mode::read_write, sycl::access::target::local> Bsub(sycl::range<2>{TS, TS}, h);
+
+			/* Define the computation */
+			h.parallel_for(sycl::nd_range<2>(sycl::range<2>{M, P}, sycl::range<2>{TS, TS}), [=](sycl::nd_item<2> item) {
+				/* Local thread identifiers */
+				const int row = item.get_local_id(0);
+				const int col = item.get_local_id(1);
+
+				/* Global thread identifiers */
+				const int globalRow = TS * item.get_group().get_id(0) + row;
+				const int globalCol = TS * item.get_group().get_id(1) + col;
+
+				T acc = 0;
+				/* Iterate over all tiles */
+				const int num_tiles = N / TS;
+				for (int t = 0; t < num_tiles; t++) {
+					/* Load a tile in cache */
+					const int tiledRow = t * TS + row;
+					const int tiledCol = t * TS + col;
+					Asub[row][col] = A[globalRow * N + tiledCol];
+					Bsub[row][col] = B[tiledRow * P + globalCol];
+
+					/* Synchronize */
+					item.barrier(sycl::access::fence_space::local_space);
+
+					/* Compute */
+					for (int k = 0; k < TS; k++) {
+						acc += Asub[row][k] * Bsub[k][col];
+					}
+					/* Synchronize */
+					item.barrier(sycl::access::fence_space::local_space);
+				}
+				/* writeback */
+				C[globalRow * M + globalCol] = acc;
+				});
+			});
+		e.wait();
+	}
+	catch (const sycl::exception& e) {
+		std::cout << "Exception occured in WideWPT (Kernel #4)\n";
+		terminate();
+	}
+}
+
 // Function set to verify results of different kernels you implement
 template <typename T>
 void MatrixMulCPU(size_t M, size_t N, size_t P,
