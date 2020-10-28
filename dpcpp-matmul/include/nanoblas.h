@@ -5,12 +5,6 @@
 #include <vector>
 #include "settings.h"
 
-#define PROFILING 1
-#if PROFILING
-#define PROFILE_SCOPE(name) InstrumentationTimer timer##__LINE__(name) // Same timernames in one fn: append LINE_NUMBER!!!
-#define PROFILE_FUNCTION() PROFILE_SCOPE(__FUNCSIG__) // __FUNCTION__ only fn name, __FUNCSIG__ shows overloads
-#endif
-
 sycl::queue create_device_queue() {
 	PROFILE_FUNCTION();
 	try {
@@ -224,7 +218,7 @@ void MatrixMulWPT(sycl::queue &q,
 }
 
 //-----------------------------------------------------------------------------
-// Kernel-4: Increase width of datatype and WPT (Work per thread) 
+// Kernel-4: Increase width of datatype and WPT  
 //-----------------------------------------------------------------------------
 template <typename T>
 void MatrixMulWideWPT(sycl::queue& q,
@@ -300,10 +294,13 @@ void MatrixMulCPU(size_t M, size_t N, size_t P,
 
 	PROFILE_FUNCTION();
 	std::cout << "Computing CPU results...\n";
-	for (size_t i = 0; i < M; i++)
+	
+	for (size_t i = 0; i < M; i++) {
 		for (size_t k = 0; k < N; k++)
-			for (size_t j = 0; j < P; j++)
+			for (size_t j = 0; j < P; j++) {
 				c_host[i * M + j] += a_host[i * M + k] * b_host[k * N + j];
+		}
+	}
 }
 
 template <typename T>
