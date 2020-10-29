@@ -8,12 +8,15 @@
 #include <string>
 #include <fstream>
 #include <algorithm>
+#include "settings.h"
 
 #define PROFILING 1
 #if PROFILING
-#define PROFILE_SCOPE(name) pfr::InstrumentationTimer timer##__LINE__(name) // Same timernames in one fn: append LINE_NUMBER!!!
-#define PROFILE_FUNCTION() PROFILE_SCOPE(__FUNCSIG__) // __FUNCTION__ only fn name, __FUNCSIG__ shows overloads
+#define PROFILE_SCOPE(name, mode) pfr::InstrumentationTimer timer##__LINE__(name, mode) // Same timernames in one fn: append LINE_NUMBER!!!
+#define PROFILE_FUNCTION(mode) PROFILE_SCOPE(__FUNCSIG__, mode) // __FUNCTION__ only fn name, __FUNCSIG__ shows overloads
 #endif
+
+#define GIGAFLOPS(x) (2*(pow(SIZE, 3))*1e-9 / x)
 
 namespace pfr {
 	struct ProfileResult {
@@ -108,8 +111,8 @@ namespace pfr {
 	class InstrumentationTimer {
 		// Scope timing class that follows RAII: Resource Acquisition Is Initialization
 	public:
-		InstrumentationTimer(const char* name)
-			: m_Name(name), m_Stopped(false)
+		InstrumentationTimer(const char* name, std::string mode = "time")
+			: m_Name(name),  m_Mode(mode), m_Stopped(false)
 		{
 			m_StartTimePoint = std::chrono::high_resolution_clock::now();
 		}
@@ -126,12 +129,17 @@ namespace pfr {
 			auto start = std::chrono::time_point_cast<std::chrono::microseconds>(m_StartTimePoint).time_since_epoch().count();
 			auto end = std::chrono::time_point_cast<std::chrono::microseconds>(endTimePoint).time_since_epoch().count();
 
-			std::cout << m_Name << ": " << (end - start) * 0.001 << "ms\n";
+			auto t_Seconds = (end - start) * 1e-6;
+			if (m_Mode == "time")
+				std::cout << m_Name << ": " << t_Seconds << "s\n";
+			else if (m_Mode == "gflops")
+				std::cout << m_Name << ": " << GIGAFLOPS(t_Seconds) << " GFLOPS (" << t_Seconds << "s)\n";
 			Instrumentor::Get().WriteProfile({ m_Name, start, end });
 		}
 
 	private:
 		const char* m_Name;
+		std::string m_Mode;
 		bool m_Stopped;
 		std::chrono::time_point<std::chrono::high_resolution_clock> m_StartTimePoint;
 	};

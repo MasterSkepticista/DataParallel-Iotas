@@ -3,9 +3,9 @@ SGEMM optimization using kernel-tricks, on SYCL.
 C[M, P] = A[M, N] * B[N, P]
 Progress (M = N = P = 4096):
 	1. [x] Kernel-1: ~7  GFLOPS | Naive parallelism with gargantuan memory accesses (roofline model)
-	2. [x] Kernel-2: ~20 GFLOPS | Tiling blocks of A, B in register/on-die cache. TS=8 is ideal for iGPU
-	3. [x] Kernel-3: ~37 GFLOPS | More Work Per Thread. Reducing the total load/stores
-	4. [ ] Kernel-4: 
+	2. [x] Kernel-2: ~15 GFLOPS | Tiling blocks of A, B in register/on-die cache. TS=8 is ideal for iGPU
+	3. [x] Kernel-3: ~25 GFLOPS | More Work Per Thread. Reducing the total load/stores
+	4. [x] Kernel-4: ~27 GFLOPS | Wider Load/Store. No WPT 
 
 */
 
@@ -16,33 +16,34 @@ Progress (M = N = P = 4096):
 #include "common.h"
 #include "nanoblas.h"
 
-#define DEBUG 0
+#if SIZE <= 16
+#define DEBUG 1
+#endif
 #define VERIFY 1
-#define PRECISION float
 
 int main() {
 	pfr::Instrumentor::Get().BeginSession("GPU MatMul");
-	PROFILE_FUNCTION();
+	PROFILE_FUNCTION("time");
 
 	/* set seed */
 	srand(39872);
 
 	// Matrix size definitions
-	constexpr size_t multiplier = 2048;
-	constexpr size_t M = 1 * multiplier;
-	constexpr size_t N = 1 * multiplier;
-	constexpr size_t P = 1 * multiplier;
+	constexpr size_t M = 1 * SIZE;
+	constexpr size_t N = 1 * SIZE;
+	constexpr size_t P = 1 * SIZE;
 
-	std::vector<PRECISION> b_host(N * P);
-	std::vector<PRECISION> a_host(M * N);
+	// float ptr matrix. &a_host points to the data.
+	float* a_host = (float*)malloc(M * N * sizeof(float*));
+	float* b_host = (float*)malloc(N * P * sizeof(float*));
 
-	std::vector<PRECISION> c_gemm1(M * P);
-	std::vector<PRECISION> c_gemm2(M * P);
-	std::vector<PRECISION> c_gemm3(M * P);
-	std::vector<PRECISION> c_gemm4(M * P);
-
-	for (auto& item : a_host) { item = rand() % 5; }
-	for (auto& item : b_host) { item = rand() % 5; }
+	float* c_gemm = (float*)malloc(M * P * sizeof(float*));
+	float* c_gemm2 = (float*)malloc(M * P * sizeof(float*));
+	float* c_gemm3 = (float*)malloc(M * P * sizeof(float*));
+	float* c_gemm4 = (float*)malloc(M * P * sizeof(float*));
+	
+	for (size_t i = 0; i < M * N; i++) { a_host[i] = rand() % 5; }
+	for (size_t i = 0; i < N * P; i++) { b_host[i] = rand() % 5; }
 
 	/*
 	Now the standard procedure of 
@@ -50,44 +51,57 @@ int main() {
 		2. Call the kernel enclosed in function
 		3. Enclose all within a try-catch block
 	*/
+	#if true
 	try {
 		sycl::queue q = create_device_queue();
 		/* Kernel-1 Basic Parallel method with too many memory accesses */
-		MatrixMulParallelNaive<PRECISION>(q, M, N, P, a_host, b_host, c_gemm1);	
+		MatrixMulParallelNaive(q, M, N, P, a_host, b_host, c_gemm);	
 		/* Kernel-2 8x8 tiled method */
-		MatrixMulTiled<PRECISION>(q, M, N, P, a_host, b_host, c_gemm2);
+		MatrixMulTiled(q, M, N, P, a_host, b_host, c_gemm2);
+		MatrixMulTiled(q, M, N, P, a_host, b_host, c_gemm2);
+		MatrixMulTiled(q, M, N, P, a_host, b_host, c_gemm2);
 		/* Kernel-3 Tiling + WPT */
-		MatrixMulWPT<PRECISION>(q, M, N, P, a_host, b_host, c_gemm3);
+		MatrixMulWPT(q, M, N, P, a_host, b_host, c_gemm3);
+		MatrixMulWPT(q, M, N, P, a_host, b_host, c_gemm3);
+		MatrixMulWPT(q, M, N, P, a_host, b_host, c_gemm3);
 		/* Kernel-4 Tiling + Wide WPT */
-		MatrixMulWideWPT<PRECISION>(q, M, N, P, a_host, b_host, c_gemm4);
+		MatrixMulWideWPT(q, M, N, P, a_host, b_host, c_gemm4);
+		MatrixMulWideWPT(q, M, N, P, a_host, b_host, c_gemm4);
+		MatrixMulWideWPT(q, M, N, P, a_host, b_host, c_gemm4);
 
 	}
 	catch (std::exception const& e) {
 		std::cout << "Exception while multiplying on GPU.\n";
 	}
+	#endif
 
-	#if DEBUG 
+	#if DEBUG
 	std::cout << "A_host\n";
-	print_matrix<float>(M, N, a_host);
+	print_matrix(M, N, a_host);
 	std::cout << "B_host\n";
-	print_matrix<float>(N, P, b_host);
+	print_matrix(N, P, b_host);
+
+	/*floatX* a_hostX = reinterpret_cast<floatX*>(a_host);
+	floatX* b_hostX = reinterpret_cast<floatX*>(b_host);
+	std::cout << "A_hostX\n";
+	print_matrix(M, N, a_hostX);
+	std::cout << "B_hostX\n";
+	print_matrix(N, P, b_hostX);*/
 
 	std::cout << "C_gemm1\n";
-	print_matrix<float>(M, P, c_gemm1);
-	std::cout << "C_gemm2\n";
-	print_matrix<float>(M, P, c_gemm2);
-	std::cout << "C_gemm3\n";
-	print_matrix<float>(M, P, c_gemm3);
+	print_matrix(M, P, c_gemm);
+	std::cout << "C_gemm4\n";
+	print_matrix(M, P, c_gemm4);
 	#endif
 
 	#if VERIFY
-	std::vector<PRECISION> c_host(M * P);
-	MatrixMulCPU<PRECISION>(M, N, P, a_host, b_host, c_host);
-
-	Verify<PRECISION>::VerifyResult(c_gemm1, c_host);
-	Verify<PRECISION>::VerifyResult(c_gemm2, c_host);
-	Verify<PRECISION>::VerifyResult(c_gemm3, c_host);
-	Verify<PRECISION>::VerifyResult(c_gemm4, c_host);
+	//float* c_host = (float*)malloc(M * P * sizeof(float*));
+	//MatrixMulCPU(M, N, P, a_host, b_host, c_host);
+	float* c_host = c_gemm;
+	Verify<float>::VerifyResult(M, P, c_gemm, c_host);
+	Verify<float>::VerifyResult(M, P, c_gemm2, c_host);
+	Verify<float>::VerifyResult(M, P, c_gemm3, c_host);
+	Verify<float>::VerifyResult(M, P, c_gemm4, c_host);
 	#endif
 	pfr::Instrumentor::Get().EndSession();
 	return 0;
